@@ -30,6 +30,15 @@ export function setPhase(phase: Phase, detail?: string): void {
   }
 }
 
+export function camera(): HTMLVideoElement {
+  return $<HTMLVideoElement>('cam');
+}
+
+/** Replaces the current phase's overlay hint, for copy that depends on the round's settings. */
+export function overlayHint(text: string): void {
+  $('overlay-text').textContent = text;
+}
+
 export function overlayBig(text: string): void {
   $('overlay-big').textContent = text;
 }

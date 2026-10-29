@@ -4,8 +4,8 @@ import {
   PHASE_COPY,
   agreement,
   captureWindowMs,
-  fraction,
   parseCountdown,
+  readyHint,
   secondsLeft,
   type Phase,
 } from '../src/game/phase';
@@ -75,54 +75,6 @@ describe('secondsLeft', () => {
   it('starts at ceil(d/1000)', () => {
     fc.assert(
       fc.property(duration, (d) => secondsLeft(d, 0) === Math.ceil(d / 1000)),
-      params,
-    );
-  });
-});
-
-describe('fraction', () => {
-  it('reports progress through the window', () => {
-    expect(fraction(4000, 1000)).toBe(0.25);
-    expect(fraction(4000, -5)).toBe(0);
-    expect(fraction(4000, 4001)).toBe(1);
-  });
-
-  it('treats an empty window as complete', () => {
-    expect(fraction(0, 0)).toBe(1);
-    expect(fraction(-100, 50)).toBe(1);
-  });
-
-  it('stays in [0, 1]', () => {
-    fc.assert(
-      fc.property(duration, elapsed, (d, e) => {
-        const f = fraction(d, e);
-        return f >= 0 && f <= 1;
-      }),
-      params,
-    );
-  });
-
-  it('is non-decreasing in elapsed time', () => {
-    fc.assert(
-      fc.property(duration, elapsed, elapsed, (d, a, b) => {
-        const [lo, hi] = a <= b ? [a, b] : [b, a];
-        return fraction(d, lo) <= fraction(d, hi);
-      }),
-      params,
-    );
-  });
-
-  it('is 0 before the start and 1 at or after the end', () => {
-    fc.assert(
-      fc.property(duration, fc.double({ min: -10_000, max: 0, noNaN: true }), (d, e) => fraction(d, e) === 0),
-      params,
-    );
-    fc.assert(
-      fc.property(
-        duration,
-        fc.double({ min: 0, max: 200_000, noNaN: true }),
-        (d, extra) => fraction(d, d + extra) === 1,
-      ),
       params,
     );
   });
@@ -208,5 +160,20 @@ describe('PHASE_COPY', () => {
 
   it('explains on the ready screen that the AI cannot hear', () => {
     expect(PHASE_COPY.ready.hint).toContain("can't hear you");
+  });
+});
+
+describe('readyHint', () => {
+  it('states the default round timing', () => {
+    expect(readyHint(3, captureWindowMs(8, 2))).toContain('you get 3 s to get in frame and about 4 s to act');
+  });
+
+  it('follows the countdown and frame parameters', () => {
+    expect(readyHint(5, captureWindowMs(16, 2))).toContain('you get 5 s to get in frame and about 8 s to act');
+    expect(readyHint(0, captureWindowMs(8, 2))).toContain('Press Start, then about 4 s to act');
+  });
+
+  it('always says the AI cannot hear', () => {
+    expect(readyHint(0, 0)).toContain("can't hear you");
   });
 });

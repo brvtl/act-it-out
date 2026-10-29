@@ -1,14 +1,14 @@
 import { generate, type DecoderPort, type FrameSampler } from '../src/model/generate';
 import { SAMPLE_RATE } from '../src/model/istft';
 import { sampleFrame } from '../src/model/maskgit';
-import { OmniRuntime } from '../src/model/omni';
+import { MODEL_FILES, OmniRuntime } from '../src/model/omni';
 import { patchifyPair, tokensPerGroup } from '../src/model/patchify';
 import { buildPrompt, expandVideo } from '../src/model/prompt';
 import { mulberry32 } from '../src/model/sampling';
 import { groupTimestamps } from '../src/model/timestamps';
 import { encodeWav } from '../src/audio/wav';
 import { trimLeadIn } from '../src/audio/trim';
-import { agreement, captureWindowMs, parseCountdown } from '../src/game/phase';
+import { agreement, captureWindowMs, parseCountdown, readyHint } from '../src/game/phase';
 import { captureFrames, waitForPicture } from '../src/video/capture';
 import { meanLuma } from '../src/video/luma';
 import * as ui from './ui';
@@ -17,7 +17,7 @@ const params = new URLSearchParams(location.search);
 const RUNS = Number(params.get('runs') ?? 3);
 const WIDTH = Number(params.get('w') ?? 448);
 const HEIGHT = Number(params.get('h') ?? 256);
-const FRAMES = Number(params.get('frames') ?? 8);
+const FRAMES = Math.max(1, Number(params.get('frames') ?? 8));
 const FPS = 2;
 const COUNTDOWN = parseCountdown(params.get('countdown'));
 const START = params.get('start') === 'auto' ? 'auto' : 'click';
@@ -79,7 +79,7 @@ async function adapterInfo() {
 }
 
 async function startCamera(): Promise<HTMLVideoElement> {
-  const video = document.getElementById('cam') as HTMLVideoElement;
+  const video = ui.camera();
   try {
     video.srcObject = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 360 } });
   } catch (e) {
@@ -171,7 +171,7 @@ async function main() {
     const pct = Math.floor((p.loaded / p.total) * 10) * 10;
     if (p.loaded === p.total || pct !== lastPct) {
       log(`  ${p.file}: ${pct}%${p.fromCache ? ' (cache)' : ''}`);
-      ui.setPhase('loading', `${pct}%`);
+      ui.setPhase('loading', `file ${MODEL_FILES.indexOf(p.file) + 1}/${MODEL_FILES.length} · ${pct}%`);
     }
     lastPct = pct;
   });
@@ -187,15 +187,21 @@ async function main() {
 
   if (START === 'click') {
     ui.setPhase('ready');
+    ui.overlayHint(readyHint(COUNTDOWN, captureWindowMs(FRAMES, FPS)));
     await ui.waitForStart();
   }
   await ui.countdown(COUNTDOWN);
 
   const stopTimer = ui.recordingTimer(captureWindowMs(FRAMES, FPS));
   const tCap = performance.now();
-  const frames = await captureFrames(video, { count: FRAMES, fps: FPS, width: WIDTH, height: HEIGHT });
-  const captureMs = performance.now() - tCap;
-  stopTimer();
+  let frames: Uint8ClampedArray[];
+  let captureMs: number;
+  try {
+    frames = await captureFrames(video, { count: FRAMES, fps: FPS, width: WIDTH, height: HEIGHT });
+    captureMs = performance.now() - tCap;
+  } finally {
+    stopTimer(); // also on failure, or the timer keeps overwriting the error screen
+  }
   ui.setPhase('thinking');
   const firstFrameLuma = meanLuma(frames[0]);
   log(`first frame luma ${firstFrameLuma.toFixed(1)}`);

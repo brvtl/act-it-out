@@ -38,7 +38,8 @@ describe('meanLuma', () => {
   });
 
   it('reports an all-black first frame below the warm-up threshold of 8', () => {
-    // Regression: frame 0 from a cold webcam used to be black; waitForPicture gates on luma > 8.
+    // waitForPicture gates on luma > 8 to skip a cold webcam's black frames. It is DOM-bound, so the gate itself
+    // is covered end to end: the runner reports video.firstFrameLuma (127 on the test pattern, 0 before).
     expect(meanLuma(solid(32 * 18, 0, 0, 0))).toBeLessThan(8);
   });
 

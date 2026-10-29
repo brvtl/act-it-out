@@ -25,7 +25,7 @@ export const PHASE_COPY: Readonly<Record<Phase, PhaseCopy>> = {
   ready: {
     status: 'Ready',
     title: 'Ready when you are',
-    hint: "Think of something to act out. Press Start, then you get 3 s to get in frame and about 4 s to act. No talking: the AI only watches, it can't hear you.",
+    hint: readyHint(3, 3500),
   },
   countdown: {
     status: 'Get ready',
@@ -54,14 +54,6 @@ export const captureWindowMs = (frames: number, fps: number): number => ((Math.m
 export const secondsLeft = (durationMs: number, elapsedMs: number): number =>
   // The explicit guard keeps "0 iff time is up" even when (d - e) / 1000 underflows to 0.
   elapsedMs >= durationMs ? 0 : Math.max(1, Math.ceil((durationMs - elapsedMs) / 1000));
-
-/** Progress through a timed window, clamped to [0, 1]; an empty window counts as complete. */
-export const fraction = (durationMs: number, elapsedMs: number): number => {
-  if (!(durationMs > 0)) return 1;
-  if (elapsedMs <= 0) return 0;
-  if (elapsedMs >= durationMs) return 1;
-  return elapsedMs / durationMs;
-};
 
 /**
  * Summarises how consistent repeated runs were: `3/3 runs agree`, or `runs: Jumping ×2, Running ×1`.
@@ -93,4 +85,10 @@ export function parseCountdown(v: string | null, fallback = 3): number {
   const n = Number(v);
   if (!Number.isFinite(n) || n < 0) return fallback;
   return Math.floor(n);
+}
+
+/** The ready-screen instructions for a round with a `countdownS` lead-in and an `actMs` recording window. */
+export function readyHint(countdownS: number, actMs: number): string {
+  const lead = countdownS > 0 ? `you get ${countdownS} s to get in frame and ` : '';
+  return `Think of something to act out. Press Start, then ${lead}about ${Math.max(1, Math.round(actMs / 1000))} s to act. No talking: the AI only watches, it can't hear you.`;
 }
