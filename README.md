@@ -65,4 +65,7 @@ Layout:
 - `tests/`: Vitest suites. Pure modules are checked against goldens from independent reference implementations
   (numpy, Jinja, Python `wave`).
 
-The model weights are LiquidAI's and are covered by their license on Hugging Face; they are not part of this repo.
+## License
+
+The code is [MIT](LICENSE). The model weights are LiquidAI's and are covered by their license on Hugging Face;
+they are not part of this repo.
