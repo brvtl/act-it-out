@@ -173,6 +173,7 @@ export class OmniRuntime implements DepthPort {
       onProgress?.(p);
     });
     const t1 = performance.now();
+    const bytes = [...files.values()].reduce((n, f) => n + f.byteLength, 0);
 
     const sessions = {} as Record<GraphKey, ort.InferenceSession>;
     for (const key of Object.keys(GRAPHS) as GraphKey[]) {
@@ -181,7 +182,6 @@ export class OmniRuntime implements DepthPort {
     }
     const decodeJson = (name: string) => JSON.parse(new TextDecoder().decode(files.get(name)));
     const tokenizer = new Tokenizer(decodeJson('tokenizer.json'), decodeJson('tokenizer_config.json'));
-    const bytes = [...files.values()].reduce((n, f) => n + f.byteLength, 0);
     return new OmniRuntime(tokenizer, sessions, {
       downloadMs: t1 - t0,
       sessionMs: performance.now() - t1,

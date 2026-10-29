@@ -1,0 +1,87 @@
+{
+  "label": "warm",
+  "wallMs": 10467,
+  "gpu": {
+    "vendor": "nvidia",
+    "architecture": "blackwell",
+    "device": "",
+    "description": "",
+    "shaderF16": true
+  },
+  "load": {
+    "downloadMs": 928.6999999992549,
+    "sessionMs": 1791.9000000022352,
+    "bytes": 2142627996,
+    "fromCache": true
+  },
+  "video": {
+    "frames": 8,
+    "width": 448,
+    "height": 256,
+    "videoTokens": 448,
+    "captureMs": 3515,
+    "encodeMs": 185.60000000149012
+  },
+  "promptTokens": 549,
+  "textRuns": [
+    {
+      "text": "Jumping",
+      "tokens": 3,
+      "prefillMs": 104.80000000074506,
+      "totalMs": 132,
+      "decodeTokPerS": 73.52941176671999
+    },
+    {
+      "text": "Jumping",
+      "tokens": 3,
+      "prefillMs": 71.59999999776483,
+      "totalMs": 88.79999999701977,
+      "decodeTokPerS": 116.27906977247876
+    },
+    {
+      "text": "Jumping",
+      "tokens": 3,
+      "prefillMs": 70.80000000074506,
+      "totalMs": 84.80000000074506,
+      "decodeTokPerS": 142.85714285714286
+    }
+  ],
+  "bench": {
+    "tokens": 128,
+    "decodeTokPerS": 119.10344180803833,
+    "text": "The person in the video is performing a series of jumping and squatting movements in a gym setting. At the start (0.0 seconds), the shirtless man, who is wearing patterned swim trunks, stands barefoot in the center of a blue exercise mat, facing the camera directly. His arms are raised up above his head with his hands clenched into fists, held in a V-shape or overhead position, as if he is pumping his arms or striking a pose.\n\nBy 1.0 second, he begins to lower his arms, bringing them down toward his sides while still standing upright on the mat,"
+  },
+  "speechRuns": [
+    {
+      "text": "Jumping.",
+      "frames": 20,
+      "firstAudioFrameMs": 102.90000000223517,
+      "generateMs": 503,
+      "vocodeMs": 158,
+      "audioSeconds": 1.6,
+      "realTimeFactor": 0.413125
+    },
+    {
+      "text": "Jumping.",
+      "frames": 20,
+      "firstAudioFrameMs": 88.19999999925494,
+      "generateMs": 472.29999999701977,
+      "vocodeMs": 143.60000000149012,
+      "audioSeconds": 1.6,
+      "realTimeFactor": 0.3849374999990686
+    },
+    {
+      "text": "Jumping.",
+      "frames": 20,
+      "firstAudioFrameMs": 86.5,
+      "generateMs": 480.5,
+      "vocodeMs": 144.69999999925494,
+      "audioSeconds": 1.6,
+      "realTimeFactor": 0.3907499999995343
+    }
+  ],
+  "webSpeech": {
+    "available": true,
+    "voices": 0
+  }
+}

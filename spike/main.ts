@@ -1,4 +1,4 @@
-import { generate, type FrameSampler } from '../src/model/generate';
+import { generate, type DecoderPort, type FrameSampler } from '../src/model/generate';
 import { SAMPLE_RATE } from '../src/model/istft';
 import { sampleFrame } from '../src/model/maskgit';
 import { OmniRuntime } from '../src/model/omni';
@@ -19,6 +19,37 @@ const SYSTEM =
   'You are the guesser in a game of charades. The player acts out a word or phrase without speaking. ' +
   'Watch the video and guess what they are acting out.';
 const QUESTION = 'What am I acting out? Answer with just your guess, in a few words.';
+const BENCH_QUESTION = 'Describe in detail what the person in the video is doing, step by step.';
+const DUMP = params.get('dump') === '1';
+
+const b64 = (a: ArrayBufferView) => {
+  let bin = '';
+  const bytes = new Uint8Array(a.buffer, a.byteOffset, a.byteLength);
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+};
+const tensorDump = (a: Float32Array, dims: number[]) => ({ b64: b64(a), dtype: '<f4', dims });
+
+function top5(logits: Float32Array): number[] {
+  return Array.from(logits.keys())
+    .sort((a, b) => logits[b] - logits[a])
+    .slice(0, 5);
+}
+
+/** Wraps a conversation to record the prefill's top-5 next tokens for the parity check. */
+function recordFirstLogits(conv: DecoderPort) {
+  const seen: { top5?: number[] } = {};
+  const port: DecoderPort = {
+    prefill: async (ids) => {
+      const out = await conv.prefill(ids);
+      seen.top5 = top5(out.logits);
+      return out;
+    },
+    feedToken: (id) => conv.feedToken(id),
+    feedFrame: (codes) => conv.feedFrame(codes),
+  };
+  return { port, seen };
+}
 
 const logEl = document.getElementById('log') as HTMLPreElement;
 const log = (msg: string) => {
@@ -32,6 +63,7 @@ declare global {
     __spikeResult?: unknown;
     __spikeError?: string;
     __spikeWav?: string;
+    __spikeDump?: unknown;
   }
 }
 
@@ -70,17 +102,18 @@ function wavBase64(samples: Float32Array): string {
   return btoa(bin);
 }
 
-async function textGuess(model: OmniRuntime, features: Float32Array, prompt: number[]) {
+async function textGuess(model: OmniRuntime, features: Float32Array, prompt: number[], maxNewTokens = 32) {
   const conv = model.conversation(features);
+  const recorder = recordFirstLogits(conv);
   const t0 = performance.now();
   let firstTokenAt = 0;
   const out = await generate(
-    conv,
+    recorder.port,
     { sample: () => Promise.reject(new Error('text only')) },
     {
       inputIds: prompt,
       speech: false,
-      maxNewTokens: 32,
+      maxNewTokens,
       onText: () => (firstTokenAt ||= performance.now()),
     },
   );
@@ -89,6 +122,8 @@ async function textGuess(model: OmniRuntime, features: Float32Array, prompt: num
   const decodeTokens = out.textIds.length - 1;
   return {
     text: model.decode(out.textIds),
+    textIds: out.textIds,
+    firstTop5: recorder.seen.top5 ?? [],
     tokens: out.textIds.length,
     prefillMs: firstTokenAt - t0,
     totalMs: end - t0,
@@ -125,6 +160,7 @@ async function speechGuess(model: OmniRuntime, features: Float32Array, prompt: n
       realTimeFactor: audioSeconds ? (genMs + vocodeMs) / 1000 / audioSeconds : null,
     },
     audio,
+    frames: out.frames,
   };
 }
 
@@ -180,18 +216,40 @@ async function main() {
     textRuns.push(r);
   }
 
+  // A long free-form answer gives a meaningful decode tok/s; the guess itself is only a couple of tokens.
+  const benchPrompt = model.encode(
+    buildPrompt({ system: SYSTEM, user: expandVideo(timestamps, perGroup) + BENCH_QUESTION }),
+  );
+  const bench = await textGuess(model, features, benchPrompt, 128);
+  log(`bench: ${bench.tokens} tokens, ${bench.decodeTokPerS.toFixed(1)} tok/s decode: "${bench.text.slice(0, 160)}…"`);
+
   const speechPrompt = model.encode(
     buildPrompt({ system: `${SYSTEM} Respond in interleaved text and audio.`, user: userTurn, speech: true }),
   );
-  let speech: unknown;
-  try {
-    const s = await speechGuess(model, features, speechPrompt);
-    speech = s.result;
-    window.__spikeWav = wavBase64(s.audio);
-    log(`speech: ${JSON.stringify(s.result)}`);
-  } catch (e) {
-    speech = { error: String(e) };
-    log(`speech failed: ${e}`);
+  const speechRuns = [];
+  let lastSpeech: Awaited<ReturnType<typeof speechGuess>> | undefined;
+  for (let i = 0; i < RUNS; i++) {
+    try {
+      lastSpeech = await speechGuess(model, features, speechPrompt);
+      speechRuns.push(lastSpeech.result);
+      log(`speech #${i + 1}: ${JSON.stringify(lastSpeech.result)}`);
+    } catch (e) {
+      speechRuns.push({ error: String(e) });
+      log(`speech #${i + 1} failed: ${e}`);
+    }
+  }
+  if (lastSpeech) window.__spikeWav = wavBase64(lastSpeech.audio);
+
+  if (DUMP) {
+    window.__spikeDump = {
+      pixelValues: pairs.map((p) => tensorDump(p.data, p.dims)),
+      videoFeatures: tensorDump(features, [features.length / 2048, 2048]),
+      inputIds: textPrompt,
+      replyIds: textRuns[0].textIds,
+      firstTop5: textRuns[0].firstTop5,
+      speechFrames: lastSpeech?.frames.map((f) => Array.from(f)) ?? [],
+      speechAudio: lastSpeech ? tensorDump(lastSpeech.audio, [lastSpeech.audio.length]) : null,
+    };
   }
 
   window.__spikeResult = {
@@ -199,8 +257,15 @@ async function main() {
     load: t,
     video: { frames: FRAMES, width: WIDTH, height: HEIGHT, videoTokens: features.length / 2048, captureMs, encodeMs },
     promptTokens: textPrompt.length,
-    textRuns,
-    speech,
+    textRuns: textRuns.map(({ text, tokens, prefillMs, totalMs, decodeTokPerS }) => ({
+      text,
+      tokens,
+      prefillMs,
+      totalMs,
+      decodeTokPerS,
+    })),
+    bench: { tokens: bench.tokens, decodeTokPerS: bench.decodeTokPerS, text: bench.text },
+    speechRuns,
     webSpeech: webSpeechStatus(),
   };
   log('done');
