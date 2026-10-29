@@ -1,0 +1,6 @@
+<|startoftext|><|im_start|>system
+SYSTEM TEXT<|im_end|>
+<|im_start|>user
+<|vision_start|><|video|><|vision_end|>USER TEXT<|im_end|>
+<|im_start|>assistant
+<think></think>
