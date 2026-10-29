@@ -1,0 +1,23 @@
+{
+  "vision": {
+    "tokens": 448,
+    "maxAbsDiff": 8.344650268554688e-6,
+    "meanAbsDiff": 2.1006509598464618e-7,
+    "minCosine": 0.9999998211860657
+  },
+  "speech": {
+    "samples": [38400, 38400],
+    "maxAbsDiff": 2.8362957461142146e-7,
+    "snrDb": 117.09503504460224,
+    "cpuRms": 0.020038509847090786
+  },
+  "decoder": {
+    "decoder_q4f16": {
+      "cpuReplyIds": [50, 50642, 124900],
+      "gpuReplyIds": [50, 50642, 124900],
+      "replyMatches": true,
+      "cpuTop5": [50, 82, 59, 44, 94371],
+      "gpuTop5": [50, 82, 59, 44, 94371]
+    }
+  }
+}

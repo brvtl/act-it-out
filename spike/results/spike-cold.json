@@ -1,0 +1,62 @@
+{
+  "label": "cold",
+  "wallMs": 49305,
+  "gpu": {
+    "vendor": "nvidia",
+    "architecture": "blackwell",
+    "device": "",
+    "description": "",
+    "shaderF16": true
+  },
+  "load": {
+    "downloadMs": 40760.400000002235,
+    "sessionMs": 1930.8999999985099,
+    "bytes": 18442388,
+    "fromCache": false
+  },
+  "video": {
+    "frames": 8,
+    "width": 448,
+    "height": 256,
+    "videoTokens": 448,
+    "captureMs": 3525.39999999851,
+    "encodeMs": 418.80000000074506
+  },
+  "promptTokens": 549,
+  "textRuns": [
+    {
+      "text": "Jumping",
+      "tokens": 3,
+      "prefillMs": 701.2999999970198,
+      "totalMs": 820.5,
+      "decodeTokPerS": 16.778523489513393
+    },
+    {
+      "text": "Jumping",
+      "tokens": 3,
+      "prefillMs": 42.899999998509884,
+      "totalMs": 57.599999997764826,
+      "decodeTokPerS": 136.0544217756033
+    },
+    {
+      "text": "Jumping",
+      "tokens": 3,
+      "prefillMs": 43.30000000074506,
+      "totalMs": 57.5,
+      "decodeTokPerS": 140.8450704299252
+    }
+  ],
+  "speech": {
+    "text": "Jumping.",
+    "frames": 20,
+    "firstAudioFrameMs": 313.9000000022352,
+    "generateMs": 726.8000000007451,
+    "vocodeMs": 359.6000000014901,
+    "audioSeconds": 1.6,
+    "realTimeFactor": 0.6790000000013969
+  },
+  "webSpeech": {
+    "available": true,
+    "voices": 0
+  }
+}
