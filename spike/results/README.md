@@ -23,3 +23,7 @@ too, so it is model output, not a synthesis bug. The game should trim the quiet 
 
 Note: `load.bytes` in `spike-cold.json` is wrong (0.02 GB): it was counted after freeing the weight buffers.
 Fixed before the warm run.
+
+UI round (later): frame 0 used to be black, so capture now waits for a non-black camera frame (reported as
+`video.warmup` and `video.firstFrameLuma`) and the runner forces `start=auto&countdown=0`; every other metric is
+measured the same way.

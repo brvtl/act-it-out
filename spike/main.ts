@@ -1,19 +1,26 @@
 import { generate, type DecoderPort, type FrameSampler } from '../src/model/generate';
 import { SAMPLE_RATE } from '../src/model/istft';
 import { sampleFrame } from '../src/model/maskgit';
-import { OmniRuntime } from '../src/model/omni';
+import { MODEL_FILES, OmniRuntime } from '../src/model/omni';
 import { patchifyPair, tokensPerGroup } from '../src/model/patchify';
 import { buildPrompt, expandVideo } from '../src/model/prompt';
 import { mulberry32 } from '../src/model/sampling';
 import { groupTimestamps } from '../src/model/timestamps';
-import { captureFrames } from '../src/video/capture';
+import { encodeWav } from '../src/audio/wav';
+import { trimLeadIn } from '../src/audio/trim';
+import { agreement, captureWindowMs, parseCountdown, readyHint } from '../src/game/phase';
+import { captureFrames, waitForPicture } from '../src/video/capture';
+import { meanLuma } from '../src/video/luma';
+import * as ui from './ui';
 
 const params = new URLSearchParams(location.search);
 const RUNS = Number(params.get('runs') ?? 3);
 const WIDTH = Number(params.get('w') ?? 448);
 const HEIGHT = Number(params.get('h') ?? 256);
-const FRAMES = Number(params.get('frames') ?? 8);
+const FRAMES = Math.max(1, Number(params.get('frames') ?? 8));
 const FPS = 2;
+const COUNTDOWN = parseCountdown(params.get('countdown'));
+const START = params.get('start') === 'auto' ? 'auto' : 'click';
 
 const SYSTEM =
   'You are the guesser in a game of charades. The player acts out a word or phrase without speaking. ' +
@@ -51,12 +58,9 @@ function recordFirstLogits(conv: DecoderPort) {
   return { port, seen };
 }
 
-const logEl = document.getElementById('log') as HTMLPreElement;
-const log = (msg: string) => {
-  logEl.textContent += msg + '\n';
-  console.log(`[spike] ${msg}`);
-};
+const log = ui.log;
 const ms = (t: number) => `${t.toFixed(0)} ms`;
+const secs = (t: number) => `${(t / 1000).toFixed(1)} s`;
 
 declare global {
   interface Window {
@@ -75,31 +79,16 @@ async function adapterInfo() {
 }
 
 async function startCamera(): Promise<HTMLVideoElement> {
-  const video = document.getElementById('cam') as HTMLVideoElement;
-  video.srcObject = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 360 } });
+  const video = ui.camera();
+  try {
+    video.srcObject = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 360 } });
+  } catch (e) {
+    if (e instanceof DOMException && (e.name === 'NotAllowedError' || e.name === 'SecurityError'))
+      throw new Error('Camera blocked: allow camera access and reload.', { cause: e });
+    throw e;
+  }
   await video.play();
   return video;
-}
-
-function wavBase64(samples: Float32Array): string {
-  const buf = new DataView(new ArrayBuffer(44 + samples.length * 2));
-  const str = (o: number, s: string) => [...s].forEach((c, i) => buf.setUint8(o + i, c.charCodeAt(0)));
-  str(0, 'RIFF');
-  buf.setUint32(4, 36 + samples.length * 2, true);
-  str(8, 'WAVEfmt ');
-  buf.setUint32(16, 16, true);
-  buf.setUint16(20, 1, true);
-  buf.setUint16(22, 1, true);
-  buf.setUint32(24, SAMPLE_RATE, true);
-  buf.setUint32(28, SAMPLE_RATE * 2, true);
-  buf.setUint16(32, 2, true);
-  buf.setUint16(34, 16, true);
-  str(36, 'data');
-  buf.setUint32(40, samples.length * 2, true);
-  samples.forEach((s, i) => buf.setInt16(44 + i * 2, Math.max(-1, Math.min(1, s)) * 0x7fff, true));
-  let bin = '';
-  new Uint8Array(buf.buffer).forEach((b) => (bin += String.fromCharCode(b)));
-  return btoa(bin);
 }
 
 async function textGuess(model: OmniRuntime, features: Float32Array, prompt: number[], maxNewTokens = 32) {
@@ -173,21 +162,49 @@ async function main() {
   const gpu = await adapterInfo();
   log(`adapter: ${JSON.stringify(gpu)}`);
 
+  // The camera starts before the model loads so the player can line up the shot while it downloads.
+  ui.setPhase('loading');
+  const video = await startCamera();
+
   let lastPct = -1;
   const model = await OmniRuntime.load((p) => {
     const pct = Math.floor((p.loaded / p.total) * 10) * 10;
-    if (p.loaded === p.total || pct !== lastPct) log(`  ${p.file}: ${pct}%${p.fromCache ? ' (cache)' : ''}`);
+    if (p.loaded === p.total || pct !== lastPct) {
+      log(`  ${p.file}: ${pct}%${p.fromCache ? ' (cache)' : ''}`);
+      ui.setPhase('loading', `file ${MODEL_FILES.indexOf(p.file) + 1}/${MODEL_FILES.length} · ${pct}%`);
+    }
     lastPct = pct;
   });
   const t = model.timings;
   log(
     `load: ${(t.bytes / 1e9).toFixed(2)} GB, download ${ms(t.downloadMs)} (cache=${t.fromCache}), sessions ${ms(t.sessionMs)}`,
   );
+  ui.stat(t.fromCache ? 'Load (cached)' : 'Model load', secs(t.downloadMs + t.sessionMs));
 
-  const video = await startCamera();
+  ui.setPhase('camera');
+  const warmup = await waitForPicture(video);
+  log(`warmup: ${warmup.frames} frames, luma ${warmup.luma.toFixed(1)}${warmup.timedOut ? ' (timed out)' : ''}`);
+
+  if (START === 'click') {
+    ui.setPhase('ready');
+    ui.overlayHint(readyHint(COUNTDOWN, captureWindowMs(FRAMES, FPS)));
+    await ui.waitForStart();
+  }
+  await ui.countdown(COUNTDOWN);
+
+  const stopTimer = ui.recordingTimer(captureWindowMs(FRAMES, FPS));
   const tCap = performance.now();
-  const frames = await captureFrames(video, { count: FRAMES, fps: FPS, width: WIDTH, height: HEIGHT });
-  const captureMs = performance.now() - tCap;
+  let frames: Uint8ClampedArray[];
+  let captureMs: number;
+  try {
+    frames = await captureFrames(video, { count: FRAMES, fps: FPS, width: WIDTH, height: HEIGHT });
+    captureMs = performance.now() - tCap;
+  } finally {
+    stopTimer(); // also on failure, or the timer keeps overwriting the error screen
+  }
+  ui.setPhase('thinking');
+  const firstFrameLuma = meanLuma(frames[0]);
+  log(`first frame luma ${firstFrameLuma.toFixed(1)}`);
 
   const tEnc = performance.now();
   const pairs = [];
@@ -206,6 +223,7 @@ async function main() {
   log(
     `video: ${FRAMES} frames ${WIDTH}x${HEIGHT}, ${features.length / 2048} tokens, encode ${ms(encodeMs)}; prompt ${textPrompt.length} tokens`,
   );
+  ui.stat('Video encode', ms(encodeMs));
 
   const textRuns = [];
   for (let i = 0; i < RUNS; i++) {
@@ -214,7 +232,17 @@ async function main() {
       `text #${i + 1}: "${r.text}" prefill ${ms(r.prefillMs)}, total ${ms(r.totalMs)}, ${r.decodeTokPerS.toFixed(1)} tok/s`,
     );
     textRuns.push(r);
+    if (i === 0) {
+      ui.showGuess(r.text, `answered in ${ms(r.prefillMs)}`);
+      ui.stat('Time to guess', ms(r.prefillMs));
+      ui.setPhase('result');
+    }
   }
+  if (textRuns.length)
+    ui.showGuess(
+      textRuns[0].text,
+      `${agreement(textRuns.map((r) => r.text))} · first answer in ${ms(textRuns[0].prefillMs)}`,
+    );
 
   // A long free-form answer gives a meaningful decode tok/s; the guess itself is only a couple of tokens.
   const benchPrompt = model.encode(
@@ -222,23 +250,34 @@ async function main() {
   );
   const bench = await textGuess(model, features, benchPrompt, 128);
   log(`bench: ${bench.tokens} tokens, ${bench.decodeTokPerS.toFixed(1)} tok/s decode: "${bench.text.slice(0, 160)}…"`);
+  ui.stat('Decode speed', `${bench.decodeTokPerS.toFixed(0)} tok/s`);
 
   const speechPrompt = model.encode(
     buildPrompt({ system: `${SYSTEM} Respond in interleaved text and audio.`, user: userTurn, speech: true }),
   );
   const speechRuns = [];
   let lastSpeech: Awaited<ReturnType<typeof speechGuess>> | undefined;
+  let spoken = false;
   for (let i = 0; i < RUNS; i++) {
     try {
       lastSpeech = await speechGuess(model, features, speechPrompt);
       speechRuns.push(lastSpeech.result);
       log(`speech #${i + 1}: ${JSON.stringify(lastSpeech.result)}`);
+      const { audio, result } = lastSpeech;
+      // Only the first spoken answer plays; later runs are measured but do not interrupt it.
+      if (!spoken && audio.length) {
+        spoken = true;
+        ui.showSpeech(result.text, encodeWav(trimLeadIn(audio, SAMPLE_RATE), SAMPLE_RATE));
+        if (result.firstAudioFrameMs !== null) ui.stat('First audio', ms(result.firstAudioFrameMs));
+      }
+      if (result.realTimeFactor !== null) ui.stat('Speech RTF', result.realTimeFactor.toFixed(2));
     } catch (e) {
       speechRuns.push({ error: String(e) });
       log(`speech #${i + 1} failed: ${e}`);
     }
   }
-  if (lastSpeech) window.__spikeWav = wavBase64(lastSpeech.audio);
+  // The saved WAV stays untrimmed so it matches the benchmarked audio; only playback is trimmed.
+  if (lastSpeech) window.__spikeWav = b64(encodeWav(lastSpeech.audio, SAMPLE_RATE));
 
   if (DUMP) {
     window.__spikeDump = {
@@ -255,7 +294,17 @@ async function main() {
   window.__spikeResult = {
     gpu,
     load: t,
-    video: { frames: FRAMES, width: WIDTH, height: HEIGHT, videoTokens: features.length / 2048, captureMs, encodeMs },
+    video: {
+      frames: FRAMES,
+      width: WIDTH,
+      height: HEIGHT,
+      videoTokens: features.length / 2048,
+      captureMs,
+      encodeMs,
+      firstFrameLuma,
+      warmup,
+      countdownS: COUNTDOWN,
+    },
     promptTokens: textPrompt.length,
     textRuns: textRuns.map(({ text, tokens, prefillMs, totalMs, decodeTokPerS }) => ({
       text,
@@ -269,9 +318,11 @@ async function main() {
     webSpeech: webSpeechStatus(),
   };
   log('done');
+  ui.setPhase('done');
 }
 
 main().catch((e) => {
   window.__spikeError = String(e?.stack ?? e);
   log(`ERROR: ${window.__spikeError}`);
+  ui.fail(e instanceof Error ? e.message : String(e));
 });
