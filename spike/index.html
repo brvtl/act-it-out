@@ -3,29 +3,578 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" href="data:," />
     <title>Act it out: feasibility spike</title>
     <style>
+      :root {
+        --bg: #0e0f13;
+        --panel: #181a21;
+        --panel-2: #1f222b;
+        --border: #2a2e39;
+        --text: #eceef3;
+        --muted: #8b91a1;
+        --accent: #7c9cff;
+        --rec: #ff4d5e;
+        --ok: #3ecf8e;
+        --radius: 14px;
+        color-scheme: dark;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      [hidden] {
+        display: none !important;
+      }
+      html,
       body {
+        min-height: 100%;
+        margin: 0;
+      }
+      body {
+        background: var(--bg);
+        color: var(--text);
         font:
-          14px/1.5 ui-monospace,
-          monospace;
-        margin: 16px;
-        background: #111;
-        color: #eee;
+          15px/1.45 system-ui,
+          -apple-system,
+          'Segoe UI',
+          sans-serif;
+        display: grid;
+        grid-template-rows: auto auto auto;
+        align-content: start;
+        gap: 16px;
+        padding: 16px 20px 24px;
+        max-width: 1320px;
+        margin: 0 auto;
+      }
+      header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        min-height: 32px;
+      }
+      h1 {
+        font-size: 18px;
+        font-weight: 650;
+        margin: 0;
+        letter-spacing: 0.01em;
+      }
+      h1 span {
+        color: var(--muted);
+        font-weight: 450;
+      }
+
+      /* Status pill */
+      .status {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 12px;
+        border-radius: 999px;
+        background: var(--panel);
+        border: 1px solid var(--border);
+        font-size: 13px;
+        color: var(--muted);
+        white-space: nowrap;
+        font-variant-numeric: tabular-nums;
+      }
+      .status::before {
+        content: '';
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--accent);
+        animation: pulse 1.2s ease-in-out infinite;
+      }
+      body[data-phase='ready'] .status::before {
+        background: var(--ok);
+      }
+      body[data-phase='recording'] .status {
+        color: var(--text);
+        border-color: rgb(255 77 94 / 0.5);
+      }
+      body[data-phase='recording'] .status::before,
+      body[data-phase='error'] .status::before {
+        background: var(--rec);
+      }
+      body[data-phase='done'] .status::before {
+        background: var(--ok);
+        animation: none;
+      }
+      body[data-phase='error'] .status::before {
+        animation: none;
+      }
+      @keyframes pulse {
+        50% {
+          opacity: 0.3;
+        }
+      }
+      @keyframes pop {
+        from {
+          opacity: 0;
+          transform: translateY(6px) scale(0.98);
+        }
+      }
+
+      /* Layout */
+      main {
+        display: grid;
+        grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+        gap: 16px;
+        align-items: start;
+      }
+      .column {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+        min-width: 0;
+      }
+      .card {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 16px 18px;
+      }
+      .label {
+        font-size: 12px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--muted);
+        margin: 0 0 8px;
+      }
+
+      /* Camera stage */
+      .stage {
+        position: relative;
+        padding: 0;
+        overflow: hidden;
+        transition: box-shadow 0.2s;
+      }
+      body[data-phase='recording'] .stage {
+        border-color: var(--rec);
+        box-shadow: 0 0 0 3px rgb(255 77 94 / 0.45);
       }
       video {
-        width: 320px;
-        border: 1px solid #444;
+        display: block;
+        width: 100%;
+        aspect-ratio: 16 / 9;
+        object-fit: cover;
+        background: #000;
+        transform: scaleX(-1);
+      }
+      .rec {
+        position: absolute;
+        top: 12px;
+        left: 12px;
+        display: none;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 10px;
+        border-radius: 999px;
+        background: rgb(0 0 0 / 0.6);
+        font-size: 13px;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+      }
+      .rec::before {
+        content: '';
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--rec);
+        animation: pulse 1s infinite;
+      }
+      body[data-phase='recording'] .rec {
+        display: inline-flex;
+      }
+      .progress {
+        position: absolute;
+        left: 0;
+        bottom: 0;
+        height: 5px;
+        width: 0;
+        background: var(--rec);
+        transition: width var(--rec-ms, 0ms) linear;
+        display: none;
+        z-index: 1; /* above the recording scrim */
+      }
+      body[data-phase='recording'] .progress {
+        display: block;
+      }
+
+      /* Overlay over the camera */
+      .overlay {
+        position: absolute;
+        inset: 0;
+        display: none;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        padding: 24px 28px;
+        text-align: center;
+        background: rgb(10 11 15 / 0.74);
+        backdrop-filter: blur(2px);
+      }
+      body:is(
+          [data-phase='loading'],
+          [data-phase='camera'],
+          [data-phase='ready'],
+          [data-phase='countdown'],
+          [data-phase='recording'],
+          [data-phase='thinking'],
+          [data-phase='error']
+        )
+        .overlay {
+        display: flex;
+      }
+      body[data-phase='countdown'] .overlay {
+        background: rgb(10 11 15 / 0.5);
+        backdrop-filter: none;
+      }
+      body[data-phase='recording'] .overlay {
+        justify-content: flex-end;
+        background: linear-gradient(to top, rgb(0 0 0 / 0.6), transparent 45%);
+        backdrop-filter: none;
+        padding-bottom: 20px;
+      }
+      .overlay-title {
+        margin: 0;
+        font-size: clamp(20px, 2.6vw, 28px);
+        font-weight: 700;
+      }
+      .overlay-title:empty,
+      .overlay-big:empty,
+      .overlay-text:empty {
+        display: none;
+      }
+      .overlay-big {
+        margin: 0;
+        font-size: clamp(48px, 10vw, 96px);
+        font-weight: 800;
+        line-height: 1;
+        font-variant-numeric: tabular-nums;
+      }
+      body[data-phase='recording'] .overlay-big {
+        font-size: clamp(36px, 6vw, 56px);
+        text-shadow: 0 2px 12px rgb(0 0 0 / 0.6);
+      }
+      .overlay-text {
+        margin: 0;
+        max-width: 44ch;
+        color: #c9cdd8;
+        font-size: 15px;
+      }
+      body[data-phase='countdown'] :is(.overlay-big, .overlay-text) {
+        text-shadow: 0 2px 10px rgb(0 0 0 / 0.7);
+      }
+      body[data-phase='recording'] .overlay-text {
+        color: var(--text);
+        font-weight: 600;
+        text-shadow: 0 1px 6px rgb(0 0 0 / 0.7);
+      }
+      body[data-phase='error'] .overlay-title {
+        color: var(--rec);
+      }
+      button.primary {
+        display: none;
+        margin-top: 8px;
+        padding: 12px 28px;
+        border: 0;
+        border-radius: 999px;
+        background: var(--accent);
+        color: #0b0d14;
+        font: inherit;
+        font-size: 16px;
+        font-weight: 700;
+        cursor: pointer;
+        box-shadow: 0 6px 20px rgb(124 156 255 / 0.3);
+      }
+      button.primary:hover {
+        filter: brightness(1.08);
+      }
+      button.primary:disabled {
+        opacity: 0.5;
+        cursor: default;
+      }
+      button:focus-visible,
+      a:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 3px;
+      }
+      body[data-phase='ready'] #start {
+        display: inline-block;
+      }
+
+      /* How to play */
+      .steps {
+        list-style: none;
+        counter-reset: step;
+        margin: 0;
+        padding: 0;
+        display: grid;
+        gap: 10px;
+      }
+      .steps li {
+        counter-increment: step;
+        display: grid;
+        grid-template-columns: 26px 1fr;
+        gap: 10px;
+        align-items: start;
+        color: var(--muted);
+        transition: color 0.2s;
+      }
+      .steps li::before {
+        content: counter(step);
+        display: grid;
+        place-items: center;
+        width: 26px;
+        height: 26px;
+        border-radius: 50%;
+        background: var(--panel-2);
+        border: 1px solid var(--border);
+        font-size: 13px;
+        font-weight: 700;
+        transition:
+          background 0.2s,
+          color 0.2s;
+      }
+      body:is([data-phase='loading'], [data-phase='camera'], [data-phase='ready']) li[data-step='frame'],
+      body:is([data-phase='countdown'], [data-phase='recording']) li[data-step='act'],
+      body:is([data-phase='thinking'], [data-phase='result'], [data-phase='done']) li[data-step='hear'] {
+        color: var(--text);
+      }
+      body:is([data-phase='loading'], [data-phase='camera'], [data-phase='ready']) li[data-step='frame']::before,
+      body:is([data-phase='countdown'], [data-phase='recording']) li[data-step='act']::before,
+      body:is([data-phase='thinking'], [data-phase='result'], [data-phase='done']) li[data-step='hear']::before {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: #0b0d14;
+      }
+
+      /* Guess */
+      .guess-card {
+        border-color: #343a4a;
+        background: linear-gradient(180deg, #1c1f29, var(--panel));
+      }
+      .guess {
+        --guess-size: clamp(32px, 4.4vw, 54px);
+        font-size: var(--guess-size);
+        font-weight: 750;
+        line-height: 1.1;
+        letter-spacing: -0.01em;
+        margin: 0;
+        /* Fixed two-line box: ui.showGuess shrinks long guesses to fit so the cards below never move. */
+        height: calc(2 * 1.1 * var(--guess-size));
+        display: flex;
+        align-items: safe center;
+        overflow: hidden;
+        overflow-wrap: anywhere;
+      }
+      .guess.pending {
+        color: var(--muted);
+        font-size: clamp(20px, 2.4vw, 26px);
+        font-weight: 500;
+      }
+      .guess.pop {
+        animation: pop 0.35s ease-out;
+      }
+      .guess-foot {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 12px;
+        margin-top: 10px;
+        min-height: 20px;
+      }
+      .meta {
+        color: var(--muted);
+        font-size: 13px;
+        font-variant-numeric: tabular-nums;
+      }
+      a {
+        color: var(--accent);
+        font-size: 14px;
+        font-weight: 600;
+        text-decoration: none;
+        white-space: nowrap;
+      }
+      a:hover {
+        text-decoration: underline;
+      }
+
+      /* Spoken answer */
+      .speech-text {
+        margin: 0 0 12px;
+        font-size: 17px;
+        overflow-wrap: anywhere;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+      }
+      .player {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-height: 40px;
+      }
+      audio {
+        flex: 1;
+        min-width: 0;
+        height: 40px;
+      }
+      .play {
+        display: none;
+        flex: none;
+        padding: 9px 16px;
+        border: 0;
+        border-radius: 999px;
+        background: var(--accent);
+        color: #0b0d14;
+        font: inherit;
+        font-weight: 700;
+        cursor: pointer;
+      }
+      #speech[data-blocked] .play {
+        display: inline-block;
+      }
+      .hint {
+        margin: 8px 0 0;
+        min-height: 1.45em;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      /* Timings */
+      .stats {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(124px, 1fr));
+        gap: 10px;
+        margin: 0;
+      }
+      .stats div {
+        background: var(--panel-2);
+        border-radius: 10px;
+        padding: 10px 12px;
+      }
+      .stats dt {
+        font-size: 12px;
+        color: var(--muted);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .stats dd {
+        margin: 2px 0 0;
+        font-size: 17px;
+        font-weight: 650;
+        font-variant-numeric: tabular-nums;
+      }
+      .stats:empty::after {
+        content: 'Measured as the round runs.';
+        grid-column: 1 / -1;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      /* Raw log */
+      details {
+        font-size: 13px;
+      }
+      summary {
+        cursor: pointer;
+        color: var(--muted);
       }
       pre {
         white-space: pre-wrap;
+        font:
+          12px/1.5 ui-monospace,
+          monospace;
+        max-height: 30vh;
+        overflow: auto;
+        margin: 8px 0 0;
+        color: var(--muted);
+      }
+
+      @media (max-width: 760px) {
+        body {
+          padding: 16px;
+        }
+        main {
+          grid-template-columns: 1fr;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .status::before,
+        .rec::before,
+        .guess.pop {
+          animation: none;
+        }
+        .progress {
+          transition: none;
+        }
       }
     </style>
   </head>
-  <body>
-    <h1>LFM3-Omni-2B WebGPU spike</h1>
-    <video id="cam" autoplay muted playsinline></video>
-    <pre id="log"></pre>
+  <body data-phase="loading">
+    <header>
+      <h1>Act it out <span>· LFM3-Omni-2B on WebGPU</span></h1>
+      <div class="status" id="status" role="status">Starting…</div>
+    </header>
+    <main>
+      <div class="column">
+        <section class="card stage" id="stage">
+          <video id="cam" autoplay muted playsinline></video>
+          <div class="rec">REC</div>
+          <div class="progress" id="progress"></div>
+          <div class="overlay" aria-live="polite">
+            <p class="overlay-title" id="overlay-title">Loading the guesser…</p>
+            <p class="overlay-big" id="overlay-big"></p>
+            <p class="overlay-text" id="overlay-text"></p>
+            <button id="start" class="primary" type="button" disabled>Start round</button>
+          </div>
+        </section>
+        <section class="card">
+          <p class="label">How to play</p>
+          <ol class="steps">
+            <li data-step="frame">Step back so your head and hands are in frame.</li>
+            <li data-step="act">
+              When the countdown ends, act something out silently. The AI only watches; it can't hear you.
+            </li>
+            <li data-step="hear">It guesses on screen and out loud.</li>
+          </ol>
+        </section>
+      </div>
+      <div class="column">
+        <section class="card guess-card">
+          <p class="label">Guess</p>
+          <p class="guess pending" id="guess" aria-live="polite">Your guess will appear here</p>
+          <div class="guess-foot">
+            <span class="meta" id="guess-meta"></span>
+            <a id="again" href="" hidden>Play again</a>
+          </div>
+        </section>
+        <section class="card" id="speech">
+          <p class="label">Spoken answer</p>
+          <p class="speech-text" id="speech-text">—</p>
+          <div class="player">
+            <button id="speech-play" class="play" type="button">▶ Play the answer</button>
+            <audio id="speech-audio" controls hidden></audio>
+          </div>
+          <p class="hint" id="speech-hint"></p>
+        </section>
+        <section class="card">
+          <p class="label">Timings</p>
+          <dl class="stats" id="stats"></dl>
+        </section>
+      </div>
+    </main>
+    <details class="card" id="log-details">
+      <summary>Raw log</summary>
+      <pre id="log"></pre>
+    </details>
     <script type="module" src="./main.ts"></script>
   </body>
 </html>
